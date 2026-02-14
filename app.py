@@ -126,7 +126,7 @@ with col2:
                 genai.configure(api_key=api_key)
                 
                 # Chọn model (Gemini 1.5 Pro hoặc Flash đều tốt cho việc này)
-                model = genai.GenerativeModel('gemini-1.5-flash') 
+                model = genai.GenerativeModel('gemini-pro') 
                 
                 with st.spinner('Đang phân tích chủ đề, tìm từ vựng và xây dựng lập luận...'):
                     # Gọi hàm tạo prompt
