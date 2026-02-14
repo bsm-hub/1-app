@@ -126,7 +126,26 @@ with col2:
                 genai.configure(api_key=api_key)
                 
                 # Chọn model (Gemini 1.5 Pro hoặc Flash đều tốt cho việc này)
-                model = genai.GenerativeModel('gemini-pro') 
+              # --- ĐOẠN CODE KIỂM TRA MODEL (Dùng tạm để sửa lỗi) ---
+st.info("Đang kiểm tra danh sách model khả dụng...")
+try:
+    available_models = []
+    for m in genai.list_models():
+        if 'generateContent' in m.supported_generation_methods:
+            available_models.append(m.name)
+    
+    if available_models:
+        st.success(f"Các model hoạt động: {available_models}")
+        # Tự động chọn model đầu tiên tìm thấy để chạy
+        model_name = available_models[0].replace("models/", "") 
+        model = genai.GenerativeModel(model_name)
+    else:
+        st.error("Không tìm thấy model nào! Có thể API Key của bạn chưa được kích hoạt 'Generative Language API'.")
+        st.stop() # Dừng chương trình
+except Exception as e:
+    st.error(f"Lỗi kết nối API: {e}")
+    st.stop()
+# -----------------------------------------------------
                 
                 with st.spinner('Đang phân tích chủ đề, tìm từ vựng và xây dựng lập luận...'):
                     # Gọi hàm tạo prompt
