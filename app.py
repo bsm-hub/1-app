@@ -126,7 +126,6 @@ with col2:
                 genai.configure(api_key=api_key)
                 
                 # Chọn model (Gemini 1.5 Pro hoặc Flash đều tốt cho việc này)
-              # --- ĐOẠN CODE KIỂM TRA MODEL (Dùng tạm để sửa lỗi) ---
 st.info("Đang kiểm tra danh sách model khả dụng...")
 try:
     available_models = []
