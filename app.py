@@ -1,121 +1,92 @@
 import streamlit as st
 import google.generativeai as genai
-import PyPDF2
-import os
 
-# --- 1. CẤU HÌNH HỆ THỐNG ---
-st.set_page_config(page_title="Goethe C1 Library", page_icon="📚", layout="wide")
+# --- CẤU HÌNH TRANG WEB ---
+st.set_page_config(page_title="Goethe C1 AI Coach", page_icon="🇩🇪", layout="wide")
 
-# --- 2. CÁC HÀM XỬ LÝ FILE ---
-def extract_text_from_pdf(uploaded_file):
-    try:
-        pdf_reader = PyPDF2.PdfReader(uploaded_file)
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text() + "\n"
-        return text
-    except:
-        return None
+st.title("🇩🇪 Goethe C1 Speaking Generator (AI Version)")
+st.markdown("Nhập chủ đề và AI sẽ tự soạn bài nói chuẩn C1 cho bạn.")
 
-# Lưu ý: Trên GitHub/Streamlit Cloud, ta không lưu file vĩnh viễn được 
-# nên dùng Session State để lưu tạm trong phiên làm việc này
-if 'knowledge_base' not in st.session_state:
-    st.session_state.knowledge_base = {}
-
-def save_to_session(filename, text):
-    clean_name = filename.rsplit('.', 1)[0]
-    st.session_state.knowledge_base[clean_name] = text
-    return clean_name
-
-# --- 3. XỬ LÝ API KEY ---
-# Tự động lấy Key từ Secrets (nếu đã cài) hoặc hiện ô nhập
+# --- CẤU HÌNH API KEY ---
+# Tự động lấy từ Secrets hoặc hiện ô nhập
 api_key = None
-try:
-    if "GEMINI_API_KEY" in st.secrets:
-        api_key = st.secrets["GEMINI_API_KEY"]
-except:
-    pass
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
 
 if not api_key:
     with st.sidebar:
-        st.header("🔑 Cài đặt")
-        api_key = st.text_input("Nhập Gemini API Key", type="password")
-        st.caption("Lấy Key tại: aistudio.google.com/app/apikey")
-        if not api_key:
-            st.warning("⚠️ Hãy nhập Key để bắt đầu!")
+        st.header("🔑 Cài đặt Key")
+        api_key = st.text_input("Dán Gemini API Key vào đây:", type="password")
+        st.info("Lấy Key tại: aistudio.google.com/app/apikey")
 
-# --- 4. GIAO DIỆN CHÍNH ---
-st.title("📚 Goethe C1 Coach (Cloud Version)")
-st.markdown("---")
-
+# --- GIAO DIỆN CHÍNH ---
 col1, col2 = st.columns([1, 2])
 
-# === CỘT TRÁI: DỮ LIỆU ===
 with col1:
-    st.subheader("📂 Tài liệu")
+    st.subheader("1. Nhập chủ đề")
+    topic = st.text_input("Thema:", placeholder="z.B. Künstliche Intelligenz, Klimawandel...")
     
-    # Upload file mới
-    uploaded_file = st.file_uploader("Upload PDF:", type=["pdf"])
-    if uploaded_file:
-        with st.spinner("Đang đọc file..."):
-            if uploaded_file.name not in st.session_state.knowledge_base:
-                raw_text = extract_text_from_pdf(uploaded_file)
-                if raw_text:
-                    save_to_session(uploaded_file.name, raw_text)
-                    st.success(f"Đã tải: {uploaded_file.name}")
-    
-    # Chọn sách đã tải
-    saved_books = list(st.session_state.knowledge_base.keys())
-    current_text = ""
-    current_book_name = ""
-    
-    if saved_books:
-        selected_book = st.selectbox("Chọn sách đang dùng:", saved_books)
-        current_text = st.session_state.knowledge_base[selected_book]
-        current_book_name = selected_book
-        st.info(f"Đang dùng: {current_book_name}")
-    else:
-        st.warning("Chưa có sách. Hãy upload file PDF.")
-
     st.markdown("---")
-    st.subheader("⚙️ Cấu hình")
-    topic = st.text_input("Chủ đề", placeholder="z.B. Umweltschutz")
-    
-    check_vocab = st.checkbox("Từ vựng (C1)", value=True)
-    check_full_script = st.checkbox("Bài nói hoàn chỉnh", value=True)
-    check_transkript = st.checkbox("Transkript", value=True)
+    st.subheader("2. Chọn nội dung")
+    check_vocab = st.checkbox("Từ vựng C1 & Paraphrasing", value=True)
+    check_grammar = st.checkbox("Cấu trúc Ngữ pháp C1", value=True)
+    check_structure = st.checkbox("Dàn bài (Gliederung)", value=True)
+    check_full_script = st.checkbox("Bài nói hoàn chỉnh (Vortrag)", value=True)
+    check_transkript = st.checkbox("Transkript (Văn nói tự nhiên)", value=True)
 
-# === CỘT PHẢI: XỬ LÝ AI ===
+# --- XỬ LÝ AI ---
 with col2:
-    if st.button("🚀 Tạo bài (Generieren)", type="primary"):
+    if st.button("🚀 Tạo bài ngay (Generieren)", type="primary"):
         if not api_key:
-            st.error("⚠️ Chưa nhập API Key!")
-        elif not current_text:
-            st.warning("⚠️ Chưa có tài liệu tham khảo!")
+            st.error("⚠️ Vui lòng nhập API Key trước.")
         elif not topic:
-            st.warning("⚠️ Chưa nhập chủ đề!")
+            st.warning("⚠️ Vui lòng nhập chủ đề.")
         else:
             try:
-                # CẤU HÌNH AI
+                # Cấu hình AI
                 genai.configure(api_key=api_key)
-                # Dùng model chuẩn: gemini-1.5-flash
+                
+                # SỬ DỤNG MODEL 1.5 FLASH (Nhanh và ổn định)
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 
+                # Tạo Prompt (Câu lệnh cho AI)
                 prompt = f"""
-                Du bist ein C1-Prüfer. Thema: '{topic}'.
-                QUELLE: {current_text[:40000]}
-                AUFGABE: Erstelle Lernmaterialien basierend auf der Quelle.
+                Du bist ein strenger Prüfer für das Goethe-Zertifikat C1.
+                Thema: '{topic}'.
+                
+                AUFGABE: Erstelle Lernmaterialien für einen Vortrag (3-4 Min).
+                
+                WICHTIGSTE REGEL (ARGUMENTATIONSTIEFE):
+                Immer wenn du ein Argument nennst, musst du es ZWINGEND mit 1-2 Sätzen vertiefen (Erklärung, Folge oder Beispiel). Das ist der Schlüssel für C1.
+                
+                Bitte erstelle:
                 """
-                if check_vocab: prompt += "\n1. Wortschatz (C1) mit Erklärungen."
-                if check_full_script: prompt += "\n2. Vortrag (mit Vertiefung der Argumente)."
-                if check_transkript: prompt += "\n3. Natürliches Transkript."
+                
+                if check_vocab:
+                    prompt += "\n1. WORTSCHATZ: 7-10 C1-Begriffe mit Synonymen."
+                if check_grammar:
+                    prompt += "\n2. GRAMMATIK: 3 passende C1-Strukturen mit Beispielen."
+                if check_structure:
+                    prompt += "\n3. GLIEDERUNG: Einleitung -> Pro/Contra -> Meinung -> Schluss."
+                if check_full_script:
+                    prompt += "\n4. VOLLSTÄNDIGER VORTRAG: Akademischer Stil. Achte auf die Vertiefung der Argumente!"
+                if check_transkript:
+                    prompt += "\n5. TRANSKRIPT: Formuliere Teil 4 um in natürliche gesprochene Sprache (mit Füllwörtern)."
 
-                with st.spinner("AI đang soạn bài..."):
+                # Gửi lệnh đi
+                with st.spinner("AI đang suy nghĩ và viết bài..."):
                     response = model.generate_content(prompt)
-                    st.success("Xong!")
+                    st.success("Hoàn tất!")
                     st.markdown(response.text)
-                    
+            
             except Exception as e:
-                st.error(f"Lỗi: {e}")
+                st.error(f"Có lỗi xảy ra: {e}")
                 if "404" in str(e):
-                    st.info("💡 Mẹo: Kiểm tra lại API Key xem đã đúng chưa.")
+                    st.markdown("""
+                    ### 🛑 CÁCH SỬA LỖI 404 (QUAN TRỌNG):
+                    Lỗi này nghĩa là **API Key của bạn sai loại**.
+                    1. Bạn đang dùng Key của **Google Cloud** (Vertex AI) -> Cái này KHÔNG chạy được code này.
+                    2. Bạn CẦN Key của **Google AI Studio**.
+                    
+                    👉 **Hãy vào đây lấy Key mới:** [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+                    """)
