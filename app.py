@@ -1,163 +1,146 @@
 import streamlit as st
 import google.generativeai as genai
+import PyPDF2
+import os
 
-# --- CẤU HÌNH TRANG WEB ---
-st.set_page_config(
-    page_title="Goethe C1 Coach",
-    page_icon="🇩🇪",
-    layout="wide"
-)
+# --- 1. CẤU HÌNH HỆ THỐNG ---
+st.set_page_config(page_title="Goethe C1 Library", page_icon="📚", layout="wide")
+DB_FOLDER = "knowledge_base"
 
-# --- TIÊU ĐỀ VÀ GIỚI THIỆU ---
-st.title("🇩🇪 Goethe C1 Speaking Generator")
-st.markdown("""
-> **Công cụ hỗ trợ soạn bài nói chuẩn C1 Goethe.** > *Đặc điểm nổi bật:* Tự động thêm câu "Vertiefung" (đào sâu/giải thích) sau mỗi luận điểm để đạt điểm tối đa tiêu chí Phát triển ý (Inhaltliche Entwicklung).
-""")
+# Tạo thư mục database nếu chưa có
+if not os.path.exists(DB_FOLDER):
+    try:
+        os.makedirs(DB_FOLDER)
+    except:
+        pass
 
-# --- XỬ LÝ API KEY (TỰ ĐỘNG HOẶC NHẬP TAY) ---
+# --- 2. CÁC HÀM XỬ LÝ FILE ---
+def extract_text_from_pdf(uploaded_file):
+    try:
+        pdf_reader = PyPDF2.PdfReader(uploaded_file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() + "\n"
+        return text
+    except:
+        return None
+
+def save_to_db(filename, text):
+    try:
+        clean_name = filename.rsplit('.', 1)[0]
+        file_path = os.path.join(DB_FOLDER, f"{clean_name}.txt")
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return clean_name
+    except:
+        return filename
+
+def load_from_db(filename):
+    try:
+        file_path = os.path.join(DB_FOLDER, filename)
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except:
+        return ""
+
+def get_saved_books():
+    try:
+        return [f for f in os.listdir(DB_FOLDER) if f.endswith(".txt")]
+    except:
+        return []
+
+# --- 3. XỬ LÝ API KEY ---
+# Tự động ưu tiên lấy Key từ Secrets hoặc nhập tay
 api_key = None
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        api_key = st.secrets["GEMINI_API_KEY"]
+except:
+    pass
 
-# Kiểm tra xem có Key trong Secrets của Streamlit Cloud không
-if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-else:
-    # Nếu không có, hiện ô nhập ở Sidebar
+if not api_key:
     with st.sidebar:
-        st.header("Cài đặt")
+        st.header("🔑 Cài đặt")
         api_key = st.text_input("Nhập Gemini API Key", type="password")
-        st.caption("Nếu deploy lên Streamlit Cloud, hãy thêm key vào phần Secrets để không phải nhập lại.")
-        st.markdown("[Lấy API Key miễn phí tại đây](https://aistudio.google.com/app/apikey)")
+        st.caption("Lấy Key tại: aistudio.google.com/app/apikey")
 
-# --- GIAO DIỆN CHÍNH ---
+# --- 4. GIAO DIỆN CHÍNH ---
+st.title("📚 Goethe C1 Coach (Fixed Version)")
+st.markdown("---")
+
 col1, col2 = st.columns([1, 2])
 
+# === CỘT TRÁI: DỮ LIỆU ===
 with col1:
-    st.subheader("1. Nhập chủ đề")
-    topic = st.text_input("Chủ đề (Thema)", placeholder="z.B. Digitalisierung in der Schule")
-    
-    st.subheader("2. Chọn nội dung cần tạo")
-    st.info("Chọn các phần bạn muốn AI soạn thảo:")
-    
-    check_vocab = st.checkbox("Từ vựng & Paraphrasing (3 biến thể)", value=True)
-    check_grammar = st.checkbox("Ngữ pháp C1 (Nominalisierung...)", value=True)
-    check_redemittel = st.checkbox("Mẫu câu dẫn dắt (Redemittel)", value=True)
-    check_structure = st.checkbox("Dàn bài chi tiết (Gliederung)", value=True)
-    check_full_script = st.checkbox("Bài nói hoàn chỉnh (Vortrag)", value=True)
-    check_transkript = st.checkbox("Transkript (Văn phong nói tự nhiên)")
+    st.subheader("📂 Tài liệu")
+    mode = st.radio("Nguồn:", ["Dùng sách đã lưu", "Upload sách mới"])
+    current_text = ""
+    current_book_name = ""
 
-# --- HÀM TẠO PROMPT (CHỈ LỆNH CHO AI) ---
-def generate_c1_prompt(topic):
-    # Prompt khởi tạo vai trò
-    prompt = f"""
-    Du bist ein strenger und erfahrener Prüfer für das Goethe-Zertifikat C1.
-    Deine Aufgabe ist es, Lernmaterialien für das Thema: '{topic}' zu erstellen.
-    
-    ---
-    ### WICHTIGSTE REGEL (ARGUMENTATIONSTIEFE):
-    Jedes Mal, wenn du im "Vollständigen Vortrag" oder in der "Gliederung" eine Meinung, ein Argument oder einen Vor-/Nachteil nennst, musst du **ZWINGEND 1-2 Sätze hinzufügen**, um diesen Punkt zu vertiefen.
-    
-    *Beispiel für Vertiefung:* - Nicht nur: "Das spart Zeit."
-    - Sondern: "Das spart Zeit. **Dies bedeutet konkret, dass Mitarbeiter diese gewonnene Zeit effektiver für komplexe Aufgaben nutzen können, was die Gesamtproduktivität des Unternehmens steigert.**"
-    ---
+    if mode == "Upload sách mới":
+        uploaded_file = st.file_uploader("Upload PDF:", type=["pdf"])
+        if uploaded_file:
+            with st.spinner("Đang xử lý..."):
+                raw_text = extract_text_from_pdf(uploaded_file)
+                if raw_text:
+                    saved_name = save_to_db(uploaded_file.name, raw_text)
+                    st.success(f"Đã lưu: {saved_name}")
+                    current_text = raw_text
+                    current_book_name = saved_name
+    else:
+        saved_books = get_saved_books()
+        if saved_books:
+            selected_file = st.selectbox("Chọn sách:", saved_books)
+            if selected_file:
+                current_text = load_from_db(selected_file)
+                current_book_name = selected_file.replace(".txt", "")
+                st.info(f"Đang dùng: {current_book_name}")
+        else:
+            st.warning("Chưa có sách nào.")
 
-    Bitte erstelle nun folgende Inhalte basierend auf den Anforderungen:
-    """
+    st.markdown("---")
+    st.subheader("⚙️ Cấu hình")
+    topic = st.text_input("Chủ đề", placeholder="z.B. Umweltschutz")
+    check_vocab = st.checkbox("Từ vựng", value=True)
+    check_full_script = st.checkbox("Bài hoàn chỉnh", value=True)
+    check_transkript = st.checkbox("Transkript", value=True)
 
-    if check_vocab:
-        prompt += """
-        \n### 1. WORTSCHATZ & PARAPHRASING (C1-Niveau)
-        - Wähle 5-7 anspruchsvolle Begriffe/Nomen-Verb-Verbindungen zum Thema.
-        - Gib zu jedem Begriff 3 Synonyme oder Umschreibungen an.
-        - Format: **Begriff** -> *Option 1 / Option 2 / Option 3*.
-        """
-    
-    if check_grammar:
-        prompt += """
-        \n### 2. GRAMMATIK-HIGHLIGHTS
-        - Nenne 3 spezifische grammatikalische Strukturen (z.B. Passiversatz, Partizipialattribute, Konjunktiv I), die man bei diesem Thema gut einbauen kann.
-        - Gib je ein konkretes Beispielsatz dazu.
-        """
-
-    if check_redemittel:
-        prompt += """
-        \n### 3. REDEMITTEL (STRUKTURIERUNG)
-        - Einleitung (Thema vorstellen & Gliederung nennen).
-        - Überleitung (zu den Alternativen/Vor-Nachteilen).
-        - Abwägen (Einerseits/Andererseits).
-        - Eigene Meinung äußern.
-        - Schlussfolgerung.
-        """
-
-    if check_structure:
-        prompt += """
-        \n### 4. DETAILLIERTE GLIEDERUNG
-        - Erstelle eine Struktur: Einleitung -> Alternativen -> Vor/Nachteile -> Eigene Meinung -> Schluss.
-        - Notiere in Stichpunkten die Argumente UND die geplante Vertiefung dazu.
-        """
-
-    if check_full_script:
-        prompt += """
-        \n### 5. VOLLSTÄNDIGER VORTRAG (MUSTERLÖSUNG - SCHRIFTSPRACHE)
-        - Schreibe einen flüssigen, akademischen Text (ca. 4 Minuten Sprechzeit).
-        - Nutze Nominalstil.
-        - **Achte penibel auf die Vertiefungs-Regel (1-2 Erläuterungssätze pro Argument).**
-        """
-
-    if check_transkript:
-        prompt += """
-        \n### 6. TRANSKRIPT (GESPROCHENE SPRACHE)
-        - Formuliere den Inhalt von Teil 5 so um, wie man ihn tatsächlich spricht.
-        - Nutze Diskurspartikel (z.B. "Nun ja", "Lassen Sie mich überlegen", "Ein wichtiger Punkt ist sicherlich...").
-        - Es soll natürlich und authentisch klingen.
-        """
-
-    return prompt
-
-# --- XỬ LÝ KHI BẤM NÚT ---
+# === CỘT PHẢI: XỬ LÝ AI ===
 with col2:
-    if st.button("🚀 Tạo bài giải C1 (Generieren)", type="primary"):
+    if st.button("🚀 Tạo bài (Generieren)", type="primary"):
         if not api_key:
-            st.error("⚠️ Vui lòng nhập API Key ở thanh bên trái hoặc cài đặt trong Secrets.")
+            st.error("⚠️ Thiếu API Key!")
+        elif not current_text:
+            st.warning("⚠️ Chưa chọn sách!")
         elif not topic:
-            st.warning("⚠️ Vui lòng nhập chủ đề trước.")
+            st.warning("⚠️ Chưa nhập chủ đề!")
         else:
             try:
-                # Cấu hình Gemini
+                # CẤU HÌNH AI
                 genai.configure(api_key=api_key)
                 
-                # Chọn model (Gemini 1.5 Pro hoặc Flash đều tốt cho việc này)
-st.info("Đang kiểm tra danh sách model khả dụng...")
-try:
-    available_models = []
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods:
-            available_models.append(m.name)
-    
-    if available_models:
-        st.success(f"Các model hoạt động: {available_models}")
-        # Tự động chọn model đầu tiên tìm thấy để chạy
-        model_name = available_models[0].replace("models/", "") 
-        model = genai.GenerativeModel(model_name)
-    else:
-        st.error("Không tìm thấy model nào! Có thể API Key của bạn chưa được kích hoạt 'Generative Language API'.")
-        st.stop() # Dừng chương trình
-except Exception as e:
-    st.error(f"Lỗi kết nối API: {e}")
-    st.stop()
-# -----------------------------------------------------
+                # SỬ DỤNG MODEL CHUẨN NHẤT: gemini-1.5-flash
+                model = genai.GenerativeModel('gemini-1.5-flash')
                 
-                with st.spinner('Đang phân tích chủ đề, tìm từ vựng và xây dựng lập luận...'):
-                    # Gọi hàm tạo prompt
-                    final_prompt = generate_c1_prompt(topic)
-                    
-                    # Gửi request lên Google
-                    response = model.generate_content(final_prompt)
-                    
-                    # Hiển thị kết quả
-                    st.success("Đã tạo xong! Dưới đây là bài giải của bạn:")
-                    st.markdown("---")
+                prompt = f"""
+                Du bist ein C1-Prüfer. Thema: '{topic}'.
+                QUELLE: {current_text[:40000]}
+                AUFGABE: Erstelle Lernmaterialien basierend auf der Quelle.
+                """
+                if check_vocab: prompt += "\n1. Wortschatz (C1) mit Erklärungen."
+                if check_full_script: prompt += "\n2. Vortrag (mit Vertiefung der Argumente)."
+                if check_transkript: prompt += "\n3. Natürliches Transkript."
+
+                with st.spinner("AI đang viết bài..."):
+                    response = model.generate_content(prompt)
+                    st.success("Hoàn tất!")
                     st.markdown(response.text)
                     
             except Exception as e:
-                st.error(f"Có lỗi xảy ra: {e}")
-                st.info("Gợi ý: Kiểm tra lại API Key hoặc đường truyền mạng.")
+                # Bắt lỗi 404 và hướng dẫn cụ thể
+                if "404" in str(e):
+                    st.error("❌ LỖI API KEY KHÔNG HỢP LỆ (404)")
+                    st.error("Nguyên nhân: Bạn đang dùng Key cũ hoặc Key của Google Cloud.")
+                    st.info("👉 Cách sửa: Hãy vào aistudio.google.com tạo Key mới và nhập lại.")
+                else:
+                    st.error(f"Lỗi khác: {e}")
